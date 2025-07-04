@@ -42,6 +42,17 @@ type RequestBuilder struct {
 	formFields  map[string]string
 }
 
+// Inicializar el builder sin URL
+func New() *RequestBuilder {
+	return &RequestBuilder{
+		method:     "GET",
+		params:     url.Values{},
+		headers:    http.Header{},
+		files:      make(map[string]multipartFile),
+		formFields: make(map[string]string),
+	}
+}
+
 // Métodos HTTP
 func Method(method, urlStr string) *RequestBuilder {
 	return &RequestBuilder{
@@ -53,11 +64,34 @@ func Method(method, urlStr string) *RequestBuilder {
 		formFields: make(map[string]string),
 	}
 }
+
 func Get(urlStr string) *RequestBuilder    { return Method("GET", urlStr) }
 func Post(urlStr string) *RequestBuilder   { return Method("POST", urlStr) }
 func Put(urlStr string) *RequestBuilder    { return Method("PUT", urlStr) }
 func Delete(urlStr string) *RequestBuilder { return Method("DELETE", urlStr) }
 func Patch(urlStr string) *RequestBuilder  { return Method("PATCH", urlStr) }
+
+// Cambiar el metodo
+func (rb *RequestBuilder) Method(method string) *RequestBuilder {
+	rb.method = method
+	return rb
+}
+
+// Cambiar o definir la URL en cualquier momento
+func (rb *RequestBuilder) URL(u string) *RequestBuilder {
+	rb.url = u
+	return rb
+}
+
+// Cargar varios parámetros desde url.Values
+func (rb *RequestBuilder) ParamsValues(values url.Values) *RequestBuilder {
+	for k, vs := range values {
+		for _, v := range vs {
+			rb.params.Add(k, v)
+		}
+	}
+	return rb
+}
 
 // Parámetros de URL (varios)
 func (rb *RequestBuilder) Params(params map[string]string) *RequestBuilder {
