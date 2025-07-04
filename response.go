@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/json"
 	"io"
+	"os"
 	"net/http"
 	"net/url"
 	"strings"
@@ -96,4 +97,11 @@ func (r *Response) Location() (*url.URL, error) {
 
 func (r *Response) Raw() *http.Response {
 	return r.resp
+}
+
+func (r *Response) ToFile(filename string) (error) {
+	if r.readErr != nil{
+		return r.readErr
+	}
+	return os.WriteFile("continue.html", r.body, 0644)
 }
