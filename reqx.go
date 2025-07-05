@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"path"
 )
 
 type multipartFile struct {
@@ -54,10 +55,10 @@ func New() *RequestBuilder {
 }
 
 // Métodos HTTP
-func Method(method, urlStr string) *RequestBuilder {
+func Method(method, ...urlStr string) *RequestBuilder {
 	return &RequestBuilder{
 		method:     method,
-		url:        urlStr,
+		url:        path.Join(urlStr...),
 		params:     url.Values{},
 		headers:    http.Header{},
 		files:      make(map[string]multipartFile),
@@ -65,11 +66,11 @@ func Method(method, urlStr string) *RequestBuilder {
 	}
 }
 
-func Get(urlStr string) *RequestBuilder    { return Method("GET", urlStr) }
-func Post(urlStr string) *RequestBuilder   { return Method("POST", urlStr) }
-func Put(urlStr string) *RequestBuilder    { return Method("PUT", urlStr) }
-func Delete(urlStr string) *RequestBuilder { return Method("DELETE", urlStr) }
-func Patch(urlStr string) *RequestBuilder  { return Method("PATCH", urlStr) }
+func Get(urlStr ...string) *RequestBuilder    { return Method("GET", urlStr...) }
+func Post(urlStr ...string) *RequestBuilder   { return Method("POST", urlStr...) }
+func Put(urlStr ...string) *RequestBuilder    { return Method("PUT", urlStr...) }
+func Delete(urlStr ...string) *RequestBuilder { return Method("DELETE", urlStr...) }
+func Patch(urlStr ...string) *RequestBuilder  { return Method("PATCH", urlStr...) }
 
 // Cambiar el metodo
 func (rb *RequestBuilder) Method(method string) *RequestBuilder {
