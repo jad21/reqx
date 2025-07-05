@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"path"
 )
 
 type multipartFile struct {
@@ -56,9 +55,13 @@ func New() *RequestBuilder {
 
 // Métodos HTTP
 func Method(method string, urlStr ...string) *RequestBuilder {
+	var url_ string
+	if len(urlStr) > 0 {
+		url_ = urlStr[0]
+	}
 	return &RequestBuilder{
 		method:     method,
-		url:        path.Join(urlStr...),
+		url:        url_,
 		params:     url.Values{},
 		headers:    http.Header{},
 		files:      make(map[string]multipartFile),
