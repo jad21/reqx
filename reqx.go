@@ -55,7 +55,7 @@ func New() *RequestBuilder {
 }
 
 // Métodos HTTP
-func Method(method string, ...urlStr string) *RequestBuilder {
+func Method(method string, urlStr ...string) *RequestBuilder {
 	return &RequestBuilder{
 		method:     method,
 		url:        path.Join(urlStr...),
