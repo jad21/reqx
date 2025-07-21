@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -114,6 +115,31 @@ func (rb *RequestBuilder) Param(key, value string) *RequestBuilder {
 // Header individual
 func (rb *RequestBuilder) Header(key, value string) *RequestBuilder {
 	rb.headers.Set(key, value)
+	return rb
+}
+
+// Headers múltiples: recibe pares "clave=valor"
+func (rb *RequestBuilder) Headers(pairs ...string) *RequestBuilder {
+	for _, pair := range pairs {
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			// O bien: panic(o log), según tu política de errores
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		rb.headers.Set(key, value)
+	}
+	return rb
+}
+
+func (rb *RequestBuilder) IsJSON() *RequestBuilder {
+	rb.isJSON = true
+	return rb
+}
+
+func (rb *RequestBuilder) Bearer(token string) *RequestBuilder {
+	rb.headers.Set("Authorization", "Bearer "+token)
 	return rb
 }
 

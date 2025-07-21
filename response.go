@@ -5,9 +5,9 @@ import (
 	"compress/zlib"
 	"encoding/json"
 	"io"
-	"os"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	// "github.com/andybalholm/brotli" // Descomenta si usas brotli externo
@@ -99,9 +99,13 @@ func (r *Response) Raw() *http.Response {
 	return r.resp
 }
 
-func (r *Response) ToFile(filename string) (error) {
-	if r.readErr != nil{
+func (r *Response) ToFile(filename string) error {
+	if r.readErr != nil {
 		return r.readErr
 	}
 	return os.WriteFile("continue.html", r.body, 0644)
+}
+
+func (r *Response) IsOK() bool {
+	return r.resp.StatusCode == http.StatusOK
 }
