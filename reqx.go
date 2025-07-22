@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -32,6 +33,7 @@ func getGlobalClient() *http.Client {
 }
 
 type RequestBuilder struct {
+	ctx         context.Context
 	method      string
 	url         string
 	params      url.Values
@@ -43,9 +45,10 @@ type RequestBuilder struct {
 	formFields  map[string]string
 }
 
-// Inicializar el builder sin URL
+// New inicializa el builder con un contexto base
 func New() *RequestBuilder {
 	return &RequestBuilder{
+		ctx:        context.Background(),
 		method:     "GET",
 		params:     url.Values{},
 		headers:    http.Header{},
@@ -54,15 +57,16 @@ func New() *RequestBuilder {
 	}
 }
 
-// Métodos HTTP
+// Method inicializa el builder con método y opcional URL, y contexto base
 func Method(method string, urlStr ...string) *RequestBuilder {
-	var url_ string
+	var u string
 	if len(urlStr) > 0 {
-		url_ = urlStr[0]
+		u = urlStr[0]
 	}
 	return &RequestBuilder{
+		ctx:        context.Background(),
 		method:     method,
-		url:        url_,
+		url:        u,
 		params:     url.Values{},
 		headers:    http.Header{},
 		files:      make(map[string]multipartFile),
@@ -70,25 +74,22 @@ func Method(method string, urlStr ...string) *RequestBuilder {
 	}
 }
 
+// Métodos cortos para HTTP
 func Get(urlStr ...string) *RequestBuilder    { return Method("GET", urlStr...) }
 func Post(urlStr ...string) *RequestBuilder   { return Method("POST", urlStr...) }
 func Put(urlStr ...string) *RequestBuilder    { return Method("PUT", urlStr...) }
 func Delete(urlStr ...string) *RequestBuilder { return Method("DELETE", urlStr...) }
 func Patch(urlStr ...string) *RequestBuilder  { return Method("PATCH", urlStr...) }
 
-// Cambiar el metodo
-func (rb *RequestBuilder) Method(method string) *RequestBuilder {
-	rb.method = method
+// WithContext permite cambiar el contexto
+func (rb *RequestBuilder) WithContext(ctx context.Context) *RequestBuilder {
+	rb.ctx = ctx
 	return rb
 }
 
-// Cambiar o definir la URL en cualquier momento
-func (rb *RequestBuilder) URL(u string) *RequestBuilder {
-	rb.url = u
-	return rb
-}
-
-// Cargar varios parámetros desde url.Values
+// Otros setters
+func (rb *RequestBuilder) Method(method string) *RequestBuilder { rb.method = method; return rb }
+func (rb *RequestBuilder) URL(u string) *RequestBuilder         { rb.url = u; return rb }
 func (rb *RequestBuilder) ParamsValues(values url.Values) *RequestBuilder {
 	for k, vs := range values {
 		for _, v := range vs {
@@ -97,61 +98,41 @@ func (rb *RequestBuilder) ParamsValues(values url.Values) *RequestBuilder {
 	}
 	return rb
 }
-
-// Parámetros de URL (varios)
 func (rb *RequestBuilder) Params(params map[string]string) *RequestBuilder {
 	for k, v := range params {
 		rb.params.Set(k, v)
 	}
 	return rb
 }
-
-// Parámetro de URL (único)
 func (rb *RequestBuilder) Param(key, value string) *RequestBuilder {
 	rb.params.Set(key, value)
 	return rb
 }
-
-// Header individual
 func (rb *RequestBuilder) Header(key, value string) *RequestBuilder {
 	rb.headers.Set(key, value)
 	return rb
 }
-
-// Headers múltiples: recibe pares "clave=valor"
 func (rb *RequestBuilder) Headers(pairs ...string) *RequestBuilder {
-	for _, pair := range pairs {
-		parts := strings.SplitN(pair, "=", 2)
-		if len(parts) != 2 {
-			// O bien: panic(o log), según tu política de errores
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		rb.headers.Set(key, value)
+	if len(pairs)%2 != 0 {
+		fmt.Println("Número de argumentos debe ser par")
+		return rb
+	}
+	for i := 0; i < len(pairs); i += 2 {
+		rb.headers.Set(strings.TrimSpace(pairs[i]), strings.TrimSpace(pairs[i+1]))
 	}
 	return rb
 }
-
-func (rb *RequestBuilder) IsJSON() *RequestBuilder {
-	rb.isJSON = true
-	return rb
-}
-
+func (rb *RequestBuilder) IsJSON() *RequestBuilder { rb.isJSON = true; return rb }
 func (rb *RequestBuilder) Bearer(token string) *RequestBuilder {
 	rb.headers.Set("Authorization", "Bearer "+token)
 	return rb
 }
-
-// Body RAW
 func (rb *RequestBuilder) Body(b []byte) *RequestBuilder {
 	rb.body = bytes.NewReader(b)
 	rb.isJSON = false
 	rb.isMultipart = false
 	return rb
 }
-
-// JSON
 func (rb *RequestBuilder) Json(data interface{}) *RequestBuilder {
 	buf, err := json.Marshal(data)
 	if err != nil {
@@ -162,65 +143,46 @@ func (rb *RequestBuilder) Json(data interface{}) *RequestBuilder {
 	rb.isMultipart = false
 	return rb
 }
-
-// Campos de formulario
 func (rb *RequestBuilder) Form(fields map[string]string) *RequestBuilder {
 	for k, v := range fields {
 		rb.formFields[k] = v
 	}
 	return rb
 }
-
-// Archivo para multipart (desde disco)
 func (rb *RequestBuilder) File(fieldname, filepathStr string) *RequestBuilder {
 	file, err := os.Open(filepathStr)
 	if err != nil {
 		panic("No se pudo abrir archivo: " + err.Error())
 	}
-	rb.files[fieldname] = multipartFile{
-		FileName: filepath.Base(filepathStr),
-		Reader:   file,
-	}
+	rb.files[fieldname] = multipartFile{FileName: filepath.Base(filepathStr), Reader: file}
 	rb.isMultipart = true
 	rb.isJSON = false
 	return rb
 }
-
-// Archivo para multipart (desde memoria []byte)
 func (rb *RequestBuilder) FileBytes(fieldname, filename string, data []byte) *RequestBuilder {
-	rb.files[fieldname] = multipartFile{
-		FileName: filename,
-		Reader:   bytes.NewReader(data),
-	}
+	rb.files[fieldname] = multipartFile{FileName: filename, Reader: bytes.NewReader(data)}
 	rb.isMultipart = true
 	rb.isJSON = false
 	return rb
 }
-
-// Archivo para multipart (desde io.Reader)
 func (rb *RequestBuilder) FileReader(fieldname, filename string, reader io.Reader) *RequestBuilder {
-	rb.files[fieldname] = multipartFile{
-		FileName: filename,
-		Reader:   reader,
-	}
+	rb.files[fieldname] = multipartFile{FileName: filename, Reader: reader}
 	rb.isMultipart = true
 	rb.isJSON = false
 	return rb
 }
 
-// Ejecución del request
+// Do ejecuta la petición usando el contexto del builder
 func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 	u, _ := url.Parse(rb.url)
 	if len(rb.params) > 0 {
 		u.RawQuery = rb.params.Encode()
 	}
 
-	// Si hay archivos: multipart/form-data
+	// Multipart
 	if rb.isMultipart && len(rb.files) > 0 {
-		bodyBuf := &bytes.Buffer{}
-		writer := multipart.NewWriter(bodyBuf)
-
-		// Archivos
+		var bodyBuf bytes.Buffer
+		writer := multipart.NewWriter(&bodyBuf)
 		for field, mfile := range rb.files {
 			part, err := writer.CreateFormFile(field, mfile.FileName)
 			if err != nil {
@@ -229,94 +191,35 @@ func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 			if _, err = io.Copy(part, mfile.Reader); err != nil {
 				return nil, err
 			}
-			// Si el archivo viene de os.File, cerrarlo aquí
 			if f, ok := mfile.Reader.(*os.File); ok {
 				f.Close()
 			}
 		}
-
-		// Otros campos de formulario
 		for k, v := range rb.formFields {
 			_ = writer.WriteField(k, v)
 		}
 		writer.Close()
-		rb.body = bodyBuf
+		rb.body = &bodyBuf
 		rb.headers.Set("Content-Type", writer.FormDataContentType())
 	} else if rb.isJSON {
 		rb.headers.Set("Content-Type", "application/json")
-	}
-
-	req, err := http.NewRequest(rb.method, u.String(), rb.body)
-	if err != nil {
-		return nil, err
-	}
-	// Headers
-	for k, v := range rb.headers {
-		for _, vv := range v {
-			req.Header.Add(k, vv)
-		}
-	}
-
-	var c *http.Client
-	if len(client) > 0 && client[0] != nil {
-		c = client[0]
-	} else {
-		c = getGlobalClient()
-	}
-	r, err := c.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return &Response{resp: r}, nil
-}
-
-// DoCtx ejecuta la petición usando el context indicado y cliente opcional.
-func (rb *RequestBuilder) DoCtx(ctx context.Context, client ...*http.Client) (*Response, error) {
-	u, _ := url.Parse(rb.url)
-	if len(rb.params) > 0 {
-		u.RawQuery = rb.params.Encode()
-	}
-
-	// Si hay archivos: multipart/form-data
-	if rb.isMultipart && len(rb.files) > 0 {
-		bodyBuf := &bytes.Buffer{}
-		writer := multipart.NewWriter(bodyBuf)
-
-		// Archivos
-		for field, mfile := range rb.files {
-			part, err := writer.CreateFormFile(field, mfile.FileName)
-			if err != nil {
-				return nil, err
-			}
-			if _, err = io.Copy(part, mfile.Reader); err != nil {
-				return nil, err
-			}
-			// Si el archivo viene de os.File, cerrarlo aquí
-			if f, ok := mfile.Reader.(*os.File); ok {
-				f.Close()
-			}
-		}
-
-		// Otros campos de formulario
+	} else if len(rb.formFields) > 0 {
+		// x-www-form-urlencoded
+		form := url.Values{}
 		for k, v := range rb.formFields {
-			_ = writer.WriteField(k, v)
+			form.Set(k, v)
 		}
-		writer.Close()
-		rb.body = bodyBuf
-		rb.headers.Set("Content-Type", writer.FormDataContentType())
-	} else if rb.isJSON {
-		rb.headers.Set("Content-Type", "application/json")
+		rb.body = strings.NewReader(form.Encode())
+		rb.headers.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	// Petición con contexto
-	req, err := http.NewRequestWithContext(ctx, rb.method, u.String(), rb.body)
+	req, err := http.NewRequestWithContext(rb.ctx, rb.method, u.String(), rb.body)
 	if err != nil {
 		return nil, err
 	}
-	// Headers
-	for k, v := range rb.headers {
-		for _, vv := range v {
-			req.Header.Add(k, vv)
+	for k, vals := range rb.headers {
+		for _, v := range vals {
+			req.Header.Add(k, v)
 		}
 	}
 

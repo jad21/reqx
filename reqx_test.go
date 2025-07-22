@@ -161,7 +161,7 @@ func TestContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 	start := time.Now()
-	_, err := Get(ts.URL + "/slow").DoCtx(ctx)
+	_, err := Get(ts.URL + "/slow").WithContext(ctx).Do()
 	if err == nil {
 		t.Errorf("expected timeout error")
 	}
@@ -190,5 +190,42 @@ func TestBytesAndStatusHelpers(t *testing.T) {
 	}
 	if !strings.HasPrefix(resp.StatusText(), "200") {
 		t.Errorf("StatusText wrong: %s", resp.StatusText())
+	}
+}
+
+func TestRequestBuilder_FormOnly(t *testing.T) {
+	// Servidor de prueba que valida la petición entrante
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1) Content-Type
+		ct := r.Header.Get("Content-Type")
+		wantCT := "application/x-www-form-urlencoded"
+		if ct != wantCT {
+			t.Errorf("Content-Type = %q; quiero %q", ct, wantCT)
+		}
+
+		// 2) Cuerpo
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("error leyendo body: %v", err)
+		}
+		got := string(body)
+		wantBody := "campo1=valor1&campo2=valor2"
+		if got != wantBody {
+			t.Errorf("Body = %q; quiero %q", got, wantBody)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// Construcción de la petición con .Form
+	_, err := Post(ts.URL).
+		Form(map[string]string{
+			"campo1": "valor1",
+			"campo2": "valor2",
+		}).
+		Do()
+	if err != nil {
+		t.Fatalf("Do() devolvió error: %v", err)
 	}
 }
