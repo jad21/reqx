@@ -86,10 +86,11 @@ func (rb *RequestBuilder) WithContext(ctx context.Context) *RequestBuilder {
 	rb.ctx = ctx
 	return rb
 }
-
+func (rb *RequestBuilder) GetURL() string { return rb.url }
 // Otros setters
 func (rb *RequestBuilder) Method(method string) *RequestBuilder { rb.method = method; return rb }
 func (rb *RequestBuilder) URL(u string) *RequestBuilder         { rb.url = u; return rb }
+
 func (rb *RequestBuilder) ParamsValues(values url.Values) *RequestBuilder {
 	for k, vs := range values {
 		for _, v := range vs {
