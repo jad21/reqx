@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -43,6 +44,7 @@ type RequestBuilder struct {
 	isMultipart bool
 	files       map[string]multipartFile // fieldname => multipartFile
 	formFields  map[string]string
+	trace       *httptrace.ClientTrace // Para traza de cliente HTTP
 }
 
 // New inicializa el builder con un contexto base
@@ -172,14 +174,20 @@ func (rb *RequestBuilder) FileReader(fieldname, filename string, reader io.Reade
 	return rb
 }
 
-// Do ejecuta la petición usando el contexto del builder
+// WithTrace asocia un ClientTrace al RequestBuilder.
+func (rb *RequestBuilder) WithTrace(trace *httptrace.ClientTrace) *RequestBuilder {
+	rb.trace = trace
+	return rb
+}
+
+// Do ejecuta la petición usando el contexto del builder, incluyendo traza si existe.
 func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 	u, _ := url.Parse(rb.url)
 	if len(rb.params) > 0 {
 		u.RawQuery = rb.params.Encode()
 	}
 
-	// Multipart
+	// Gestión de multipart, JSON y form fields...
 	if rb.isMultipart && len(rb.files) > 0 {
 		var bodyBuf bytes.Buffer
 		writer := multipart.NewWriter(&bodyBuf)
@@ -204,7 +212,6 @@ func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 	} else if rb.isJSON {
 		rb.headers.Set("Content-Type", "application/json")
 	} else if len(rb.formFields) > 0 {
-		// x-www-form-urlencoded
 		form := url.Values{}
 		for k, v := range rb.formFields {
 			form.Set(k, v)
@@ -213,7 +220,12 @@ func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 		rb.headers.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	req, err := http.NewRequestWithContext(rb.ctx, rb.method, u.String(), rb.body)
+	// Crear la petición con el contexto original o envuelto con la traza
+	reqCtx := rb.ctx
+	if rb.trace != nil {
+		reqCtx = httptrace.WithClientTrace(rb.ctx, rb.trace)
+	}
+	req, err := http.NewRequestWithContext(reqCtx, rb.method, u.String(), rb.body)
 	if err != nil {
 		return nil, err
 	}
@@ -223,12 +235,14 @@ func (rb *RequestBuilder) Do(client ...*http.Client) (*Response, error) {
 		}
 	}
 
+	// Selección de cliente HTTP
 	var c *http.Client
 	if len(client) > 0 && client[0] != nil {
 		c = client[0]
 	} else {
 		c = getGlobalClient()
 	}
+	// Ejecución de la petición
 	r, err := c.Do(req)
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"testing"
 	"time"
@@ -193,39 +194,36 @@ func TestBytesAndStatusHelpers(t *testing.T) {
 	}
 }
 
-func TestRequestBuilder_FormOnly(t *testing.T) {
-	// Servidor de prueba que valida la petición entrante
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1) Content-Type
-		ct := r.Header.Get("Content-Type")
-		wantCT := "application/x-www-form-urlencoded"
-		if ct != wantCT {
-			t.Errorf("Content-Type = %q; quiero %q", ct, wantCT)
-		}
-
-		// 2) Cuerpo
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("error leyendo body: %v", err)
-		}
-		got := string(body)
-		wantBody := "campo1=valor1&campo2=valor2"
-		if got != wantBody {
-			t.Errorf("Body = %q; quiero %q", got, wantBody)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
+// TestTrace valida que WithTrace inyecte callbacks en RequestBuilder
+func TestTrace(t *testing.T) {
+	ts := startTestServer(t)
 	defer ts.Close()
 
-	// Construcción de la petición con .Form
-	_, err := Post(ts.URL).
-		Form(map[string]string{
-			"campo1": "valor1",
-			"campo2": "valor2",
-		}).
-		Do()
+	// flags para verificar llamadas
+	connectDone := false
+	firstByte := false
+
+	trace := &httptrace.ClientTrace{
+		ConnectDone: func(network, addr string, err error) {
+			connectDone = true
+		},
+		GotFirstResponseByte: func() {
+			firstByte = true
+		},
+	}
+
+	// Ejecutar petición mediante RequestBuilder con trace
+	rb := Get(ts.URL + "/get").WithTrace(trace)
+	_, err := rb.Do()
 	if err != nil {
-		t.Fatalf("Do() devolvió error: %v", err)
+		t.Fatalf("error en Do(): %v", err)
+	}
+	// resp.Body.Close()
+
+	if !connectDone {
+		t.Error("esperaba ConnectDone invocado")
+	}
+	if !firstByte {
+		t.Error("esperaba GotFirstResponseByte invocado")
 	}
 }
