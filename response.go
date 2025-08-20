@@ -1,9 +1,11 @@
 package reqx
 
 import (
+	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,6 +34,11 @@ func (r *Response) cacheBody() {
 		case "gzip":
 			gz, err := gzip.NewReader(reader)
 			if err != nil {
+				// Fallback si el cuerpo NO es realmente gzip
+				if errors.Is(err, gzip.ErrHeader) || strings.Contains(err.Error(), "invalid header") {
+					r.body, r.readErr = io.ReadAll(reader)
+					return
+				}
 				r.readErr = err
 				return
 			}
@@ -40,6 +47,13 @@ func (r *Response) cacheBody() {
 		case "deflate":
 			zr, err := zlib.NewReader(reader)
 			if err != nil {
+				// Algunos servidores envían deflate “raw” (sin envoltura zlib)
+				if errors.Is(err, zlib.ErrHeader) {
+					fr := flate.NewReader(reader)
+					defer fr.Close()
+					r.body, r.readErr = io.ReadAll(fr)
+					return
+				}
 				r.readErr = err
 				return
 			}
