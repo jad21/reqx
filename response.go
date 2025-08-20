@@ -1,11 +1,12 @@
 package reqx
 
 import (
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -25,48 +26,94 @@ type Response struct {
 // Decodifica automáticamente según Content-Encoding
 func (r *Response) cacheBody() {
 	r.once.Do(func() {
-		var reader io.ReadCloser = r.resp.Body
+		reader := r.resp.Body
 		defer reader.Close()
 
-		encoding := strings.ToLower(strings.TrimSpace(r.resp.Header.Get("Content-Encoding")))
+		// Siempre leemos el cuerpo "tal cual" primero.
+		raw, err := io.ReadAll(reader)
+		if err != nil {
+			r.readErr = fmt.Errorf("read raw body failed (status=%d, content-encoding=%q): %w",
+				r.resp.StatusCode, r.resp.Header.Get("Content-Encoding"), err)
+			return
+		}
 
-		switch encoding {
+		// Si el Transport ya lo descomprimió, no intentes descomprimir otra vez.
+		// (http.Transport lo hace cuando él mismo añadió "Accept-Encoding: gzip")
+		if r.resp.Uncompressed {
+			r.body = raw
+			r.readErr = nil
+			return
+		}
+		encodings := strings.TrimSpace(r.resp.Header.Get("Content-Encoding"))
+		enc := strings.ToLower(encodings)
+		if i := strings.Index(enc, ","); i >= 0 {
+			enc = strings.TrimSpace(enc[:i])
+		}
+
+		switch enc {
 		case "gzip":
-			gz, err := gzip.NewReader(reader)
+			gr, err := gzip.NewReader(bytes.NewReader(raw))
 			if err != nil {
-				// Fallback si el cuerpo NO es realmente gzip
-				if errors.Is(err, gzip.ErrHeader) || strings.Contains(err.Error(), "invalid header") {
-					r.body, r.readErr = io.ReadAll(reader)
-					return
-				}
-				r.readErr = err
+				// Error con contexto
+				r.readErr = fmt.Errorf("gzip.NewReader failed (status=%d, content-encoding=%q): %w",
+					r.resp.StatusCode, encodings, err)
+				// Si todo falla, deja crudo
+				r.body = raw
 				return
 			}
-			defer gz.Close()
-			r.body, r.readErr = io.ReadAll(gz)
+			defer gr.Close()
+			dec, derr := io.ReadAll(gr)
+			if derr != nil {
+				r.readErr = fmt.Errorf("read gzip body failed (status=%d, content-encoding=%q): %w",
+					r.resp.StatusCode, encodings, derr)
+				// Si todo falla, deja crudo
+				r.body = raw
+				return
+			}
+			r.body = dec
+			r.readErr = nil
+
 		case "deflate":
-			zr, err := zlib.NewReader(reader)
-			if err != nil {
-				// Algunos servidores envían deflate “raw” (sin envoltura zlib)
-				if errors.Is(err, zlib.ErrHeader) {
-					fr := flate.NewReader(reader)
-					defer fr.Close()
-					r.body, r.readErr = io.ReadAll(fr)
+			if zr, err := zlib.NewReader(bytes.NewReader(raw)); err == nil {
+				defer zr.Close()
+				if dec, derr := io.ReadAll(zr); derr == nil {
+					r.body = dec
+					r.readErr = nil
 					return
+				} else {
+					r.readErr = fmt.Errorf("read deflate(zlib) body failed (status=%d, content-encoding=%q): %w",
+						r.resp.StatusCode, encodings, derr)
 				}
-				r.readErr = err
+			}
+			// fallback a raw deflate
+			fr := flate.NewReader(bytes.NewReader(raw))
+			defer fr.Close()
+			if dec, derr := io.ReadAll(fr); derr == nil {
+				r.body = dec
+				r.readErr = nil
 				return
 			}
-			defer zr.Close()
-			r.body, r.readErr = io.ReadAll(zr)
+			r.readErr = fmt.Errorf("read deflate(raw) body failed (status=%d, content-encoding=%q)", r.resp.StatusCode, encodings)
+			// Si todo falla, deja crudo
+			r.body = raw
+
 		case "br":
-			// Brotli no soportado nativamente en Go estándar hasta 1.21.
-			// Puedes usar la siguiente línea si importas github.com/andybalholm/brotli
-			// br := brotli.NewReader(reader)
-			// r.body, r.readErr = io.ReadAll(br)
-			r.body, r.readErr = io.ReadAll(reader) // Por defecto, solo lee el stream
+			// Brotli no soportado nativamente
+			dec, derr := io.ReadAll(bytes.NewReader(raw))
+			if derr != nil {
+				r.readErr = fmt.Errorf("read br body failed (status=%d, content-encoding=%q): %w",
+					r.resp.StatusCode, encodings, derr)
+				// Si todo falla, deja crudo
+				r.body = raw
+				return
+			}
+			r.body = dec
+			r.readErr = nil
+
 		default:
-			r.body, r.readErr = io.ReadAll(reader)
+			// Sin codificación o desconocida -> crudo
+			r.body = raw
+			r.readErr = nil
 		}
 	})
 }
